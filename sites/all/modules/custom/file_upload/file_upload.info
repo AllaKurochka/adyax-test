@@ -1,0 +1,4 @@
+name = Uploading files
+description = Provides a page with form for uploading files and table with info about them.
+core = 7.x
+package = Adyax

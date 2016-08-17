@@ -1,0 +1,171 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function file_upload_menu() {
+	$items['file-upload'] = array(
+		'title' => 'Form and table.',
+		'page callback' => 'file_upload_get_content',
+		'access callback' => TRUE,
+		'type' => MENU_CALLBACK,
+	);
+	$items['file-upload/%/delete'] = array(
+		'title' => 'Remove file',
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('file_upload_delete_file_form', 1),
+		'access callback' => TRUE,
+		'type' => MENU_CALLBACK,
+	);
+
+	return $items;
+}
+
+/**
+ * Menu callback for page 'file-upload'.
+ */
+function file_upload_get_content() {
+	// Create table for displaying uploaded files.
+	$header = array('No.', 'File name', 'MIME Type', 'Size', 'Date', 'Op.');
+	$rows = array();
+	$result = db_query("SELECT * FROM {file_managed} ORDER BY timestamp ASC");
+	$number = 1;
+	foreach ($result as $row) {
+		$rows[] = array(
+			$number,
+			l($row->filename, file_create_url($row->uri)),
+			$row->filemime,
+			formatSizeUnits($row->filesize),
+			format_date($row->timestamp),
+			l('x', file_create_url("file-upload/$row->fid/delete")),
+		);
+		$number++;
+	}
+	$table = theme('table', array('header' => $header, 'rows' => $rows));
+
+	// Get form for uploading files.
+	$file_upload_form = drupal_get_form('file_upload_form');
+	$form = drupal_render($file_upload_form);
+
+	// Create renderable output array.
+	$output = array(
+		'form' => array(
+			'#type' => 'markup',
+			'#markup' => $form,
+		),
+		'table' => array(
+			'#type' => 'markup',
+			'#markup' => $table,
+		),
+	);
+	return $output;
+}
+
+/**
+ * Create form for uploading files.
+ */
+function file_upload_form() {
+
+	$form = array();
+	$form['file'] = array(
+		'#description' => t('Allowed extensions: jpg jpeg gif png txt doc xls pdf'),
+		'#title' => t('Upload a file'),
+		'#type' => 'file',
+	);
+	$form['submit'] = array(
+		'#submit' => array('file_upload_submit'),
+		'#type' => 'submit',
+		'#validate' => array('file_upload_validate'),
+		'#value' => t('Submit'),
+	);
+
+	return $form;
+}
+
+/**
+ * Validate function for upload form.
+ */
+function file_upload_validate($form, &$form_state) {
+	$file = file_save_upload('file', array(
+		'file_validate_extensions' => array('jpg jpeg gif png txt doc xls pdf'),
+		'file_validate_size' => array(50 * 1024 * 1024),
+	));
+	if ($file) {
+		if ($file = file_move($file, 'public://')) {
+			$form_state['values']['file'] = $file;
+		} else {
+			form_set_error('file', t('Failed to write the uploaded file the site\'s file folder.'));
+		}
+	} else {
+		form_set_error('file', t('No file was uploaded.'));
+	}
+}
+
+/**
+ * Submit function for uploading form.
+ */
+function file_upload_submit($form, &$form_state) {
+	$file = $form_state['values']['file'];
+	unset($form_state['values']['file']);
+	$file->status = FILE_STATUS_PERMANENT;
+	file_save($file);
+	drupal_set_message(t('File @filename has been saved.', array('@filename' => $file->filename)));
+}
+
+/**
+ * Create form for deleting file.
+ */
+function file_upload_delete_file_form($form, &$form_state, $fid) {
+
+	$form['#fid'] = $fid;
+	$result = db_query("SELECT filename FROM {file_managed} WHERE fid = :fid", array(':fid' => $fid))->fetchObject();
+	$form['header'] = array
+		(
+		'#markup' => t('Are you sure you wish to delete the item with a field value of @value?', array('@value' => $result->filename)),
+		'#prefix' => '<p>',
+		'#suffix' => '</p>',
+	);
+	$form['delete_button'] = array
+		(
+		'#type' => 'submit',
+		'#value' => t('Delete'),
+	);
+	$form['#submit'][] = 'file_upload_delete_file_submit';
+
+	return $form;
+}
+
+/**
+ * Submit function for deleting file.
+ */
+function file_upload_delete_file_submit($form, &$form_state) {
+	if ($form_state['values']['op'] == $form_state['values']['delete_button']) {
+		$fid = $form['#fid'];
+		db_delete('file_managed')
+				->condition('fid', $fid)
+				->execute();
+	}
+	$form_state['redirect'] = 'file-upload';
+	drupal_set_message(t('The file has been deleted.'));
+}
+
+/**
+ * Snippet for converting bytes.
+ */
+function formatSizeUnits($bytes) {
+	if ($bytes >= 1073741824) {
+		$bytes = number_format($bytes / 1073741824, 2) . 'GB';
+	} elseif ($bytes >= 1048576) {
+		$bytes = number_format($bytes / 1048576, 2) . 'MB';
+	} elseif ($bytes >= 1024) {
+		$bytes = number_format($bytes / 1024, 2) . 'kB';
+	} elseif ($bytes > 1) {
+		$bytes = $bytes . 'bytes';
+	} elseif ($bytes == 1) {
+		$bytes = $bytes . 'byte';
+	} else {
+		$bytes = '0bytes';
+	}
+
+	return $bytes;
+}
